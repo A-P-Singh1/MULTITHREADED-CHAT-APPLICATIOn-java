@@ -1,0 +1,175 @@
+
+import java.io.*;
+import java.net.*;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public class Main {
+
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        System.out.println("=== Java Chat Application ===");
+        System.out.println("1. Start Server");
+        System.out.println("2. Start Client");
+        System.out.print("Enter your choice: ");
+
+        int choice = sc.nextInt();
+        sc.nextLine();
+
+        if (choice == 1) {
+            ChatServer.startServer();
+        } else if (choice == 2) {
+            System.out.print("Enter server IP (default localhost): ");
+            String host = sc.nextLine().trim();
+            if (host.isEmpty()) {
+                host = "localhost";
+            }
+
+            System.out.print("Enter your name: ");
+            String name = sc.nextLine();
+
+            ChatClient.startClient(host, name);
+        } else {
+            System.out.println("Invalid choice.");
+        }
+    }
+
+    static class ChatServer {
+        private static final int PORT = 5000;
+        private static final CopyOnWriteArrayList<ClientHandler> clients = new CopyOnWriteArrayList<>();
+
+        public static void startServer() {
+            try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+                System.out.println("Server started on port " + PORT);
+                System.out.println("Waiting for clients...");
+
+                while (true) {
+                    Socket socket = serverSocket.accept();
+                    System.out.println("New client connected: " + socket.getInetAddress());
+
+                    ClientHandler handler = new ClientHandler(socket);
+                    clients.add(handler);
+                    handler.start();
+                }
+            } catch (IOException e) {
+                System.out.println("Server error: " + e.getMessage());
+            }
+        }
+
+        public static void broadcast(String message, ClientHandler sender) {
+            for (ClientHandler client : clients) {
+                if (client != sender) {
+                    client.sendMessage(message);
+                }
+            }
+        }
+
+        public static void removeClient(ClientHandler client) {
+            clients.remove(client);
+        }
+
+        static class ClientHandler extends Thread {
+            private Socket socket;
+            private BufferedReader in;
+            private PrintWriter out;
+            private String clientName;
+
+            public ClientHandler(Socket socket) {
+                this.socket = socket;
+            }
+
+            public void run() {
+                try {
+                    in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    out = new PrintWriter(socket.getOutputStream(), true);
+
+                    out.println("Enter your name:");
+                    clientName = in.readLine();
+
+                    System.out.println(clientName + " joined the chat.");
+                    broadcast(clientName + " joined the chat.", this);
+
+                    String message;
+                    while ((message = in.readLine()) != null) {
+                        if (message.equalsIgnoreCase("exit")) {
+                            break;
+                        }
+
+                        String fullMessage = clientName + ": " + message;
+                        System.out.println(fullMessage);
+                        broadcast(fullMessage, this);
+                    }
+                } catch (IOException e) {
+                    System.out.println("Client disconnected.");
+                } finally {
+                    try {
+                        if (clientName != null) {
+                            System.out.println(clientName + " left the chat.");
+                            broadcast(clientName + " left the chat.", this);
+                        }
+
+                        removeClient(this);
+                        if (socket != null) {
+                            socket.close();
+                        }
+                    } catch (IOException e) {
+                        System.out.println("Error closing client socket.");
+                    }
+                }
+            }
+
+            public void sendMessage(String message) {
+                if (out != null) {
+                    out.println(message);
+                }
+            }
+        }
+    }
+
+    static class ChatClient {
+        private static final int PORT = 5000;
+
+        public static void startClient(String host, String name) {
+            try (
+                Socket socket = new Socket(host, PORT);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                Scanner sc = new Scanner(System.in)
+            ) {
+                System.out.println("Connected to chat server.");
+
+                String prompt = in.readLine();
+                System.out.println(prompt);
+                out.println(name);
+
+                Thread readThread = new Thread(() -> {
+                    try {
+                        String serverMessage;
+                        while ((serverMessage = in.readLine()) != null) {
+                            System.out.println(serverMessage);
+                        }
+                    } catch (IOException e) {
+                        System.out.println("Disconnected from server.");
+                    }
+                });
+
+                readThread.start();
+
+                System.out.println("Type messages. Type 'exit' to leave.");
+
+                while (true) {
+                    String message = sc.nextLine();
+                    out.println(message);
+
+                    if (message.equalsIgnoreCase("exit")) {
+                        break;
+                    }
+                }
+
+            } catch (IOException e) {
+                System.out.println("Unable to connect: " + e.getMessage());
+            }
+        }
+    }
+}
